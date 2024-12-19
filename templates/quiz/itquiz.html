@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>IT Quiz</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Icons" rel="stylesheet">
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    <style>
+        /* Custom CSS for IT Quiz */
+        body {
+            background-color: #f8f9fa;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            max-width: 800px;
+        }
+
+        .quiz-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            margin-bottom: 20px;
+            border-radius: 10px;
+        }
+
+        .card-body {
+            background-color: #ffffff;
+        }
+
+        .btn {
+            background-color: #007bff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        .btn:hover {
+            background-color: #0056b3;
+        }
+
+        .question {
+            font-size: 1.25rem;
+            font-weight: bold;
+        }
+
+        .answer-options {
+            margin-top: 15px;
+        }
+
+        .answer-option {
+            margin-bottom: 10px;
+        }
+
+        .quiz-footer {
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .quiz-footer a {
+            text-decoration: none;
+            font-size: 1.1rem;
+            color: #007bff;
+        }
+
+        .quiz-footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-5">
+    <!-- Quiz Header -->
+    <div class="quiz-header">
+        <h1 class="display-4">IT Quiz</h1>
+        <p class="lead">Test your knowledge of Information Technology!</p>
+    </div>
+
+    <form method="POST" action="{{ url_for('itscore') }}">
+
+        {% for question in itquiz %}
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <p class="question">{{ question.question }}</p>
+                <div class="answer-options">
+                    <!-- Option A -->
+                    <div class="form-check answer-option">
+                        <input class="form-check-input" type="radio" name="question{{ loop.index }}" id="answer{{ loop.index }}A" value="A">
+                        <label class="form-check-label" for="answer{{ loop.index }}A">{{ question.option1 }}</label>
+                    </div>
+
+                    <!-- Option B -->
+                    <div class="form-check answer-option">
+                        <input class="form-check-input" type="radio" name="question{{ loop.index }}" id="answer{{ loop.index }}B" value="B">
+                        <label class="form-check-label" for="answer{{ loop.index }}B">{{ question.option2 }}</label>
+                    </div>
+
+                    <!-- Option C -->
+                    <div class="form-check answer-option">
+                        <input class="form-check-input" type="radio" name="question{{ loop.index }}" id="answer{{ loop.index }}C" value="C">
+                        <label class="form-check-label" for="answer{{ loop.index }}C">{{ question.option3 }}</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="quiz-footer">
+          <button type="submit" class="btn btn-primary">Submit Quiz</button>
+        
+        </div>
+        <a href="{{url_for('itback')}}" class="btn btn-primary">Back</a>
+
+    </form>
+
+</div>
+
+<!-- Bootstrap JS (Optional for interactivity) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
