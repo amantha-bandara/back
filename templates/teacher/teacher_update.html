@@ -1,0 +1,98 @@
+{% extends 'base2.html' %}
+
+{% block content %}
+<!DOCTYPE html>
+<head>
+    <title>Teacher's Details</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://getbootstrap.com/docs/5.3/assets/css/docs.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+    #heading{
+        color: green;
+    }
+    .form-select{
+        background: #22776B;
+        color: white;
+        border-radius: 8px 8px 8px 8px;
+    }
+    img{
+        border-radius: 50%;
+    }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <hr>
+        <h4>Teacher's Profile</h4><br>
+        <div class="container text-center">
+            <div class="row">
+                <div class="col">
+                    <!-- Profile Picture -->
+                    {% if teacher.pic %}
+                        <img src="{{ url_for('static', filename='uploads/' + teacher.pic) }}" width="225px" height="225px">
+                    {% else %}
+                        <img src="static/dd.png" width="250px" height="250px">
+                    {% endif %}
+                </div>
+                <div class="col">
+                    <!-- Form to Update Teacher's Profile -->
+                    <form method="POST" enctype="multipart/form-data">
+                        <!-- First Name -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="first_name" placeholder="First name" value="{{ teacher.first_name }}">
+                            <label for="floatingInput">First Name:</label>
+                        </div>
+                        <!-- Last Name -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="last_name" placeholder="Last name" value="{{ teacher.last_name }}">
+                            <label for="floatingInput">Last Name:</label>
+                        </div>
+                        <!-- Full Name (editable now) -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="full_name" placeholder="Full name" value="{{ teacher.first_name }} {{ teacher.last_name }}">
+                            <label for="floatingInput">Full Name:</label>
+                        </div>
+                        <!-- Grade -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="grade" placeholder="Grade" value="{{ teacher.grade }}">
+                            <label for="floatingInput">Grade:</label>
+                        </div>
+                        <!-- Qualifications -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="qualifications" placeholder="Qualifications" value="{{ teacher.qualifications }}">
+                            <label for="floatingInput">Qualifications:</label>
+                        </div>
+                        <!-- Telephone Number -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="t_no" placeholder="Telephone number" value="{{ teacher.t_no }}">
+                            <label for="floatingInput">Telephone Number:</label>
+                        </div>
+                        <!-- Email -->
+                        <div class="form-floating mb-3">
+                            <input type="email" class="form-control" id="floatingInput" name="email" placeholder="Email" value="{{ teacher.email }}">
+                            <label for="floatingInput">Email:</label>
+                        </div>
+                        <!-- Fees -->
+                        <div class="form-floating mb-3">
+                            <input type="text" class="form-control" id="floatingInput" name="fees" placeholder="Fees" value="{{ teacher.fees }}">
+                            <label for="floatingInput">Fees:</label>
+                        </div>
+                        <!-- Profile Picture Upload -->
+                        <div class="form-floating mb-3">
+                            <input type="file" class="form-control" id="floatingInput" name="pic" placeholder="Upload Picture">
+                            <label for="floatingInput">Profile Picture:</label>
+                        </div>
+                        <!-- Submit Button -->
+                        <button type="submit" class="btn btn-success">Update Profile</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <br><br>
+    </div>
+</body>
+</html>
+{% endblock %}

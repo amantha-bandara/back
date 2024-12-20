@@ -1,6 +1,4 @@
-{% include "admin/admin.html" %}
 
-{% block content %}
 <div class="container mt-4">
 
     <!-- Search Form -->
@@ -14,16 +12,15 @@
     </div>
 
     <!-- Table Section -->
-    <div class="my-4">
-        <div class="table-responsive">
-            <table class="table table-striped table-bordered table-hover user-table">
+    
+    <table class="table-light">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>First Name</th>
-                        <th>Last Name</th>
-                        <th>Telephone Number</th>
-                        <th>Email</th>
+                        <th scope="col">ID</th>
+                        <th scope="col">First Name</th>
+                        <th scope="col">Last Name</th>
+                        <th scope="col">Telephone Number</th>
+                        <th scope="col">Email</th>
                         
                         <th>Status</th>
                     </tr>
@@ -49,39 +46,12 @@
                 </tbody>
             </table>
         </div>
-    </div>
 
-</div>
 
 
 <!-- Add the following CSS to style the button and the approved state -->
 <style>
-    /* General Table Styling */
-    .user-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 1.5rem;
-    }
-
-    .user-table th, .user-table td {
-        padding: 12px 15px;
-        text-align: left;
-    }
-
-    .user-table th {
-        background-color: #343a40;
-        color: #fff;
-    }
-
-    .user-table tbody tr:nth-child(odd) {
-        background-color: #f9f9f9;
-    }
-
-    .user-table tbody tr:hover {
-        background-color: #f1f1f1;
-        cursor: pointer;
-    }
-
+   
     /* Styling the Search Form */
     .search-input {
         border-radius: 25px;
@@ -143,4 +113,11 @@
         }
     }
 </style>
-{%endblock%}
+</body>
+
+
+<div class="my-4">
+    <div class="table-responsive">
+    </div>
+
+</div>
