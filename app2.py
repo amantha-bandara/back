@@ -15,10 +15,15 @@ from dotenv import load_dotenv
 from flask_wtf.csrf import CSRFProtect
 import hashlib
 import requests
-import sendgrid
-from sendgrid.helpers.mail import Mail, Email, To, Content
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
+import flask_monitoringdashboard as Dashboard
+import csv
+
+
+
 
 app = Flask(__name__)
 load_dotenv()
@@ -30,7 +35,8 @@ app.config['SQLALCHEMY_BINDS'] = {
     'squiz': 'sqlite:///squiz.db',
     'upload': 'sqlite:///upload.db',
     'class': 'sqlite:///class.db',
-    're': 'sqlite:///re.db'
+    're': 'sqlite:///re.db',
+    'attendance': 'sqlite:///attendance.db'
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
@@ -38,16 +44,23 @@ app.config['UPLOADED_IMAGES_DEST'] = 'static/uploads'
 app.config['SERVER_NAME'] = '127.0.0.1:5000'
 app.config['SESSION_COOKIE_NAME'] = 'google-login-session'
 app.config['WTF_CSRF_ENABLED'] = True
-SENDGRID_API_KEY = ''
+
+
+
 images = UploadSet('images', IMAGES)
 configure_uploads(app, images)
 
 bcrypt = Bcrypt(app)
 oauth = OAuth(app)
-csrf = CSRFProtect(app)
+csrf =CSRFProtect(app)
 db = SQLAlchemy(app)
 socket = SocketIO(app)
 migrate = Migrate(app,db)
+mail = Mail(app)
+
+Dashboard.bind(app)
+  # Set your desired password
+  # Disable CSRF for specific routes
 
 
 def generate_nonce():
@@ -66,7 +79,7 @@ def serve_worker():
 
 google = oauth.register(
     name='google',
-   
+    
     authorize_url='https://accounts.google.com/o/oauth2/auth',
     access_token_url='https://accounts.google.com/o/oauth2/token',
     client_kwargs={'scope': 'openid email profile'},
@@ -87,17 +100,22 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-class Tclass(db.Model):
+class Tclass(db.Model,UserMixin):
     __tablename__ = 'tclass'
-    __bind_key__ = 'class'  # This ties the model to the 'class' database
+    __bind_key__ = 'class'  # Ties the model to the 'class' database
+    
     id = db.Column(db.Integer, primary_key=True)
     subject = db.Column(db.String(255), nullable=False)
-    teacher = db.Column(db.String(255), nullable=False)
+    teacher = db.Column(db.String(255), nullable=False)  # Teacher's name (optional)
     fees = db.Column(db.Float, nullable=False)
     grade = db.Column(db.String(255), nullable=False)
     time = db.Column(db.String(255), nullable=False)
-    date = db.Column(db.String(255), nullable=False)
-    image_path = db.Column(db.String(255), nullable=False)
+    date = db.Column(db.String(255), nullable=False)  # Day of the week
+    image_path = db.Column(db.String(255), nullable=True)  # Path to the image
+    teacher_id = db.Column(db.Integer, nullable=False)  # Store teacher's ID without foreign key
+    zoom_link = db.Column(db.String(255), nullable=True)
+    exam_link = db.Column(db.String(255), nullable=True)
+    quiz_link = db.Column(db.String(255), nullable=True)
     
 
 class User(db.Model, UserMixin):
@@ -115,7 +133,17 @@ class User(db.Model, UserMixin):
     status = db.Column(db.Integer, default=0, nullable=False)
     it_score = db.Column(db.Integer, default=0, nullable=True)
     science_score = db.Column(db.Integer, default=0, nullable=True)
-    class1 = db.Column(db.Integer, default=0, nullable=True)
+    missed_classes = db.Column(db.Integer, default=0, nullable=True)
+
+class Attendance(db.Model):
+    __bind_key__='attendance'
+    __tablename__ = 'attendance'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    class_name = db.Column(db.Integer,nullable = True)
+    user_id = db.Column(db.Integer, nullable=False)  # No foreign key constraint
+    zoom_id = db.Column(db.String, nullable=False)
+    attended_date = db.Column(db.Date, nullable=False)
     
 
 
@@ -144,7 +172,8 @@ class Teacher(db.Model,UserMixin):
     password = db.Column(db.String(200), nullable=False)
     fees = db.Column(db.String(100), nullable=False)
     subject = db.Column(db.String(100), nullable=False)
-
+    pic = db.Column(db.String(100), nullable=True)
+    qualifications = db.Column(db.String(100), nullable=True)
 
 class ItQuiz(db.Model):
     __bind_key__ = 'it_quiz'  # Binds this model to the 'it_quiz' database
@@ -191,20 +220,56 @@ class Receipt(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    user = User.query.get(int(user_id)) or Teacher.query.get(int(user_id))
+    return user
+
+
 
 def send_registration_email(user_email):
+    subject = 'Welcome to Our Flask App'
+    content = 'Thank you for registering with our Flask app!'
+
     message = Mail(
-        from_email='nerosense124@gmail.com',
-        to_emails=user_email,
-        subject='Welcome to Our Flask App',
-        plain_text_content='Thank you for registering with our Flask app!'
+        from_email='nerosense124@gmail.com',  # Sender email
+        to_emails=user_email,  # Recipient email
+        subject=subject,
+        plain_text_content=content
     )
+
     try:
-        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-        sg.send(message)
+        # Initialize SendGrid client and send the email
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"Email sent successfully! Status code: {response.status_code}")
     except Exception as e:
         print(f"Error sending email: {e}")
+
+def send_reminder_email(user_email, first_name, last_name, missed_classes):
+    subject = f'Attendance Reminder: {first_name} {last_name}, You\'ve Missed {missed_classes} Classes'
+    
+    content = (
+        f'Dear {first_name} {last_name},\n\n'
+        f'We noticed that you have missed {missed_classes} classes. Regular attendance is important to '
+        f'keep up with the course content and ensure academic success. Please make sure to attend your upcoming classes.\n\n'
+        'If you need any assistance or have questions about the course, feel free to reach out to us.\n\n'
+        'Thank you for your attention, and we look forward to seeing you in class soon.\n\n'
+        'Best regards,\nYour School Administration'
+    )
+
+    message = Mail(
+        from_email='nerosense124@gmail.com',  # Sender email
+        to_emails=user_email,  # Recipient email
+        subject=subject,
+        plain_text_content=content
+    )
+
+    try:
+        # Send the email using SendGrid API
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"Reminder email sent to {user_email}! Status code: {response.status_code}")
+    except Exception as e:
+        print(f"Error sending email to {user_email}: {e}")
 
 @app.route('/')
 def main():
@@ -264,8 +329,9 @@ def login():
                 if teacher:
                     if bcrypt.check_password_hash(teacher.password, pas):
                         login_user(teacher)
+                        print(current_user.id,'logged in successfully a s teacher')
                         flash('Login successful as Teacher','success')
-                        return redirect(url_for('t_profile'))  # Redirect to teacher dashboard
+                        return redirect(url_for('teacher_profile'))  # Redirect to teacher dashboard
                     else:
                         flash("Incorrect password for Teacher account",'danger')
                 else:
@@ -286,7 +352,7 @@ def logout():
 @app.route('/profile')
 @login_required
 def profile():
-    print(current_user.class1)
+   
     return render_template('profile.html')
 
 @app.route('/update', methods=['GET', 'POST'])
@@ -423,8 +489,8 @@ def auth():
         if user :
             if user.status == 1:
                 login_user(user)
-                flash('successful')
-                return redirect(url_for('profile'))
+                flash(' login successful','success')
+                return redirect(url_for('lass'))
             else:
                 flash('pending approval')
                 return redirect(url_for('login'))
@@ -790,13 +856,319 @@ def approve_receipt(receipt_id):
    # For Squiz database
  # Print all IT quiz questions created by this teacher
 
-@app.route('/got to quiz')
-def gotquiz():
-    return render_template('common/quiz.html')
+@app.route('/got to quiz/<int:class_id>')
+def gotquiz(class_id):
+    class_data = Tclass.query.get(class_id)
+    return render_template('common/quiz.html',class_data = class_data)
+@app.route('/got to exam/<int:class_id>')
+def exam(class_id):
+    class_data = Tclass.query.get(class_id)
+    return render_template('common/exam.html',class_data = class_data)
 
-@app.route('/teacher/profile')
-def t_profile():
-    return render_template('teacher/profile.html')
+@app.route('/teacher_profile')
+@login_required 
+def teacher_profile():
+    teacher = Teacher.query.get(current_user.id)  # Assuming current_user is a Teacher
+    return render_template('teacher/teacher_profile.html', teacher=teacher)
+
+
+@app.route('/teacher_update', methods=['GET', 'POST'])
+@login_required 
+@csrf.exempt
+def teacher_update():
+    # Get the logged-in teacher's details
+    teacher = Teacher.query.get(current_user.id)  # Assuming current_user is the logged-in teacher
+    
+    if request.method == 'POST':
+        # 1. Update teacher's details from the form
+        teacher.first_name = request.form.get('first_name')
+        teacher.last_name = request.form.get('last_name')
+        teacher.grade = request.form.get('grade')
+        teacher.qualifications = request.form.get('qualifications')
+        teacher.t_no = request.form.get('t_no')
+        teacher.email = request.form.get('email')
+        teacher.fees = request.form.get('fees')
+
+        # 2. Handle password change (if provided)
+        password = request.form.get('password')
+        if password:
+            hashed_password = bcrypt.generate_password_hash(password)
+            teacher.password = hashed_password
+        
+        # 3. Handle profile picture upload
+        pic = request.files.get('pic')
+        if pic:
+            # Ensure the file has an extension
+            if '.' in pic.filename:
+                ext = pic.filename.rsplit('.', 1)[1].lower()
+                if ext in ALLOWED_EXTENSIONS:
+                    # Save the picture securely
+                    filename = secure_filename(pic.filename)
+                    pic.save(os.path.join(app.config['UPLOADED_IMAGES_DEST'], filename))  # Ensure 'UPLOADED_IMAGES_DEST' is set correctly in app config
+                    teacher.pic = filename
+                else:
+                    flash('Only JPG, JPEG, and PNG files are allowed.', 'danger')
+                    return redirect(url_for('teacher_update'))
+            else:
+                flash('Invalid file extension. Please upload an image file.', 'danger')
+                return redirect(url_for('teacher_update'))
+        
+        # 4. Commit the changes to the database
+        try:
+            db.session.commit()
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('teacher_profile'))
+        except Exception as e:
+            # Handle any errors that may occur during commit
+            db.session.rollback()  # Rollback in case of any errors
+            flash(f'An error occurred: {str(e)}', 'danger')
+            return render_template('teacher/teacher_update.html', teacher=teacher)
+
+    # Render the update form
+    return render_template('teacher/teacher_update.html', teacher=teacher)
+
+@app.route('/teacher/add_class', methods=['GET', 'POST'])
+@login_required  # Ensure only logged-in teachers can add classes
+def add_classs():
+    if request.method == 'POST':
+        teacher = request.form['teacher'] 
+        subject = request.form['subject']
+        fees = float(request.form['fees'])
+        grade = request.form['grade']
+        time = request.form['time']
+        day_of_week = request.form['day_of_week']
+        c = current_user.id
+        # Handle image upload (optional)
+        pic = request.files.get('image')
+        image_path = None  # Default to None if no image is uploaded
+        if pic and '.' in pic.filename:
+            ext = pic.filename.rsplit('.', 1)[1].lower()
+            if ext in ALLOWED_EXTENSIONS:
+                filename = secure_filename(pic.filename)
+                pic.save(os.path.join(app.config['UPLOADED_IMAGES_DEST'], filename))
+                image_path = filename
+            else:
+                flash('Only JPG, JPEG, and PNG files are allowed.', 'danger')
+                return redirect(url_for('add_class'))
+        print(f"Teacher ID: {c}")
+        # Insert new class data into the database
+        new_class = Tclass(
+            subject=subject,
+            teacher=teacher,  # Use teacher's name
+            fees=fees,
+            grade=grade,
+            time=time,
+            date=day_of_week,  # Store the selected day of the week
+            image_path=image_path,
+            teacher_id=c  # Directly assign the teacher's ID
+        )
+
+        db.session.add(new_class)
+        db.session.commit()
+        flash('New class added successfully!', 'success')
+        return redirect(url_for('teacher_classes'))  # Redirect to the teacher's classes page
+
+    return render_template('add.html')  # Return to the form if GET request
+
+@app.route('/teacher_classes')
+@login_required  # Ensure only logged-in teachers can access this
+def teacher_classes():
+    # Fetch the classes created by the logged-in teacher based on teacher_id
+    classes = Tclass.query.filter_by(teacher_id=current_user.id).all()
+    return render_template('teacher/myclasses.html', classes=classes)
+
+@app.route('/teacher/class/<int:class_id>', methods=['GET', 'POST'])
+def class_details_t(class_id):
+    # Fetch the class data from the database
+    class_data = Tclass.query.get(class_id)
+
+    if request.method == 'POST':
+        # Only allow the teacher of the class to update the Zoom link
+        if current_user.id == class_data.teacher_id:
+            zoom_link = request.form.get('zoom_link')
+            class_data.zoom_link = zoom_link  # Update the Zoom link for the class
+            db.session.commit()  # Commit the changes to the database
+            return redirect(url_for('class_details_t', class_id=class_id))  # Redirect to the class details page
+
+    return render_template('teacher/class_page.html', class_data=class_data,class_id=class_id)
+
+
+@app.route('/class/<int:class_id>/add_zoom_link', methods=['POST'])
+@csrf.exempt
+def add_zoom_link(class_id):
+    # Fetch the class based on the class_id
+    class_data = Tclass.query.get(class_id)
+    
+    # Make sure the current user is the teacher
+    if current_user.id == class_data.teacher_id:
+        # Get the Zoom link from the form
+        zoom_link = request.form.get('zoom_link')
+        class_data.zoom_link = zoom_link  # Update the Zoom link for the class
+        db.session.commit()  # Commit the changes to the database
+
+    return redirect(url_for('class_details_t', class_id=class_id))
+
+
+@app.route('/class/<int:class_id>/add_quiz', methods=['GET', 'POST'])
+@csrf.exempt
+def add_quiz_link(class_id):
+    # Fetch the class based on the class_id
+    class_data = Tclass.query.get(class_id)
+
+    if request.method == 'POST':
+        # Ensure the current user is the teacher
+        if current_user.id == class_data.teacher_id:
+            # Get the quiz link from the form
+            quiz_link = request.form.get('quiz_link')
+            class_data.quiz_link = quiz_link  # Update the quiz link for the class
+            db.session.commit()  # Commit the changes to the database
+        
+        # After adding the quiz link, redirect to the class details page
+        return redirect(url_for('class_details_t', class_id=class_id))
+        
+    return render_template('teacher/add_quiz_link.html', class_id=class_id, class_data=class_data)
+
+@app.route('/class/<int:class_id>/add_exam', methods=['GET', 'POST'])
+@csrf.exempt
+def add_exam_link(class_id):
+    # Fetch the class based on the class_id
+    class_data = Tclass.query.get(class_id)
+
+    if request.method == 'POST':
+        # Ensure the current user is the teacher
+        if current_user.id == class_data.teacher_id:
+            # Get the exam link from the form
+            exam_link = request.form.get('exam_link')
+            class_data.exam_link = exam_link  # Update the exam link for the class
+            db.session.commit()  # Commit the changes to the database
+        
+        # After adding the exam link, redirect to the class details page
+        return redirect(url_for('class_details_t', class_id=class_id))
+        
+    return render_template('teacher/add_exam_link.html', class_id=class_id, class_data=class_data)
+@app.route('/upload_attendance/<int:class_id>', methods=['GET', 'POST'])
+@csrf.exempt
+def upload_attendance(class_id):
+    if request.method == 'POST':
+        if 'file' not in request.files:
+          flash('no file in request')
+          return redirect(request.url)
+        file = request.files['file']
+        if file.filename == '':
+            flash('No selected file')
+            return redirect(request.url)
+        if file:
+            filename = os.path.join(app.config['UPLOADED_IMAGES_DEST'],file.filename)
+            file.save(filename)
+            get_attendance(filename)
+            flash('Attendance processed successfully!','success')
+            return redirect(url_for('class_details_t',class_id = class_id))
+          
+    return render_template('upload_attendance.html',class_id=class_id)
+
+import csv
+
+import csv
+
+import csv
+
+def get_attendance(filename):
+    with open(filename, 'r') as file:
+        reader = csv.DictReader(file)
+        print("CSV Headers:", reader.fieldnames)  # Print out the headers
+        zoom_attendance = {row['Zoom ID']: row for row in reader}
+        
+        users = User.query.all()  # This returns a list of User objects
+        
+        # Iterate over each user to check if they missed a class
+        for user in users:
+            # Strip the `id` from the CSV if it exists (if present as part of the name)
+            combined_name = f'{user.first_name} {user.last_name}'
+
+            # Strip the ID from the CSV names (if it's in the CSV) for comparison
+            for zoom_id, row in zoom_attendance.items():
+                csv_name = row['Name'].strip()  # Assuming the name is in the 'Name' field in the CSV
+                csv_name_parts = csv_name.split()
+                if len(csv_name_parts) > 2:  # ID may be at the end
+                    csv_name = ' '.join(csv_name_parts[:-1])  # Remove the last part (ID)
+                
+                # Now compare the name without the ID
+                if csv_name == combined_name:
+                    break
+            else:
+                # If the user name isn't found in the CSV, mark them as missing the class
+                user.missed_classes += 1
+                db.session.commit()
+
+                
+@app.route('/check_missed_classes', methods=['GET'])
+def check_missed_classes():
+    # Fetch students who have missed more than 3 classes
+    students = User.query.filter(User.missed_classes > 3).all()
+    
+    # Send reminder email for each student
+    for student in students:
+        # Pass necessary details to send_reminder_email
+        send_reminder_email(
+            user_email=student.email, 
+            first_name=student.first_name, 
+            last_name=student.last_name, 
+            missed_classes=student.missed_classes
+        )
+    
+    return "Reminders sent!", 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 @app.route('/static/js/OneSignalSDKWorker.js')
 def onesignal_worker():
