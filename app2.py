@@ -46,7 +46,6 @@ app.config['SESSION_COOKIE_NAME'] = 'google-login-session'
 app.config['WTF_CSRF_ENABLED'] = True
 
 
-
 images = UploadSet('images', IMAGES)
 configure_uploads(app, images)
 
@@ -116,6 +115,9 @@ class Tclass(db.Model,UserMixin):
     zoom_link = db.Column(db.String(255), nullable=True)
     exam_link = db.Column(db.String(255), nullable=True)
     quiz_link = db.Column(db.String(255), nullable=True)
+    notification = db.Column(db.String(255), nullable=True)
+    
+    
     
 
 class User(db.Model, UserMixin):
@@ -211,12 +213,14 @@ class Receipt(db.Model):
     __tablename__ = 're'
 
     id = db.Column(db.Integer, primary_key=True)
-    student_name = db.Column(db.String(100), nullable=False)
+    student_name = db.Column(db.String(100), nullable=True)
+    student_id = db.Column(db.Integer, nullable=True)
     class_id = db.Column(db.Integer, nullable=False)
     receipt_image = db.Column(db.String(150), nullable=True)
     status = db.Column(db.String(50), default="Pending")  # 'Pending' or 'Approved'
     payment_date = db.Column(db.String,nullable = False)
-
+    bank_id = db.Column(db.String(255),nullable=True)
+    phone_number = db.Column(db.String(255),nullable=True)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -815,29 +819,83 @@ def my_classes():
     paid_classes = Tclass.query.filter(Tclass.id.in_(paid_class_ids)).all()
     
     return render_template('my_classes.html', classes=paid_classes)
-@app.route('/add_receipt', methods=['GET', 'POST'])
+@app.route('/payment/<int:class_id>', methods=['POST'])
 @csrf.exempt
-def add_receipt():
-    if request.method == 'POST':
-        student_name = request.form['student_name']
-        class_id = request.form['class_id']
-        payment_date = request.form['payment_date']
-
-        # Call the function to add the receipt to the database
+def submit_receipt(class_id):
+    # Get the form data
+    bank_id = request.form.get('bank_id')
+    student_id = request.form.get('student_id')
+    class_id_ = request.form.get('class_id')
+    receipt_file = request.files.get('receipt')
+    phone_number = request.form.get('phone')
+    student_name = current_user.first_name
+    # Check if a receipt was uploaded
+    if receipt_file :
+        filename = secure_filename(receipt_file.filename)
+        # Save the file to the server
+        receipt_path = os.path.join(app.config['UPLOADED_IMAGES_DEST'] , filename)
+        receipt_file.save(receipt_path)
+        
+        # Store receipt information in the database
         new_receipt = Receipt(
             student_name=student_name,
-            class_id=class_id,
-            payment_date=payment_date,
-            status="Pending"  # Default status is 'Pending'
+            student_id=student_id,
+            class_id=class_id_,
+            bank_id=bank_id,
+            receipt_image=filename,
+            payment_date=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            phone_number =phone_number
         )
-        
-        # Add and commit to the database
         db.session.add(new_receipt)
         db.session.commit()
 
-        return redirect(url_for('approve_receipts'))  # Redirect to a page to view receipts (create this route as needed)
+        # Redirect to the admin approval page or success page
+        flash('payment successful wait for admin approval','success')
+        return redirect(url_for('class_details',class_id =class_id))
+    
 
-    return render_template('add_receipt.html')
+    return 'Receipt upload failed', 400
+
+
+
+  # Replace with your Zapier Webhook URL
+
+@app.route('/admin/approval', methods=['GET', 'POST'])
+@csrf.exempt
+def admin_approval():
+    # Get all the receipts with 'Pending' status
+    receipts = Receipt.query.filter_by(status='Pending').all()
+
+    if request.method == 'POST':
+        receipt_id = request.form.get('receipt_id')
+        action = request.form.get('action')
+
+        # Get the receipt based on receipt_id
+        receipt = Receipt.query.get(receipt_id)
+
+        if action == 'approve':
+            receipt.status = 'Approved'
+            db.session.commit()
+
+            # Send data to Zapier Webhook
+            data =   {
+              "phone_number": receipt.phone_number,  # The student's phone number (ensure it's in E.164 format)
+              "status": receipt.status,              # The status of the payment (approved or rejected)
+              "student_name": receipt.student_name,  # The student's name
+            }
+
+            response = requests.post(ZAPIER_WEBHOOK_URL, json=data)
+            print(f"Zapier response: {response.status_code},message was send for{receipt.phone_number}")
+
+        elif action == 'reject':
+            receipt.status = 'Rejected'
+            db.session.commit()
+
+        # Redirect back to the approval page
+        return redirect(url_for('admin_approval'))
+
+    return render_template('admin_approval.html', receipts=receipts)
+
 @app.route('/admin/approve_receipts', methods=['GET'])
 @csrf.exempt
 def approve_receipts():
@@ -1049,30 +1107,60 @@ def add_exam_link(class_id):
 @app.route('/upload_attendance/<int:class_id>', methods=['GET', 'POST'])
 @csrf.exempt
 def upload_attendance(class_id):
+    classes_attendance = []
+
     if request.method == 'POST':
         if 'file' not in request.files:
-          flash('no file in request')
-          return redirect(request.url)
+            return 'No file part', 400
+        
         file = request.files['file']
+        
         if file.filename == '':
-            flash('No selected file')
-            return redirect(request.url)
-        if file:
-            filename = os.path.join(app.config['UPLOADED_IMAGES_DEST'],file.filename)
-            file.save(filename)
-            get_attendance(filename)
-            flash('Attendance processed successfully!','success')
-            return redirect(url_for('class_details_t',class_id = class_id))
-          
-    return render_template('upload_attendance.html',class_id=class_id)
+            return 'No selected file', 400
+        
+        if file and file.filename.endswith('.csv'):
+            # Get class name from the form data
+            class_name = request.form['class_name']
+            
+            # Save the file to the server
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOADED_IMAGES_DEST'], filename))
+            
+            # Process the CSV and save attendance
+            get_attendance(os.path.join(app.config['UPLOADED_IMAGES_DEST'], filename), class_name)
 
-import csv
+    # Get all classes (Tclass model)
+    all_classes = Tclass.query.all()
 
-import csv
+    # For each class, get attendance data
+    for tclass in all_classes:
+        # Get the total number of students in the class (filtered by class_id)
+        total_students = len(User.query.all()) # Use class_id to filter users
+        print(f"Total Students: {total_students}, Type: {type(total_students)}")  # Debug print
 
-import csv
+        # Get the number of students who attended today for that class
+        today = datetime.now().date()
+        attendees = db.session.query(Attendance).filter(Attendance.class_name == tclass.subject, Attendance.attended_date == today).count()
+        print(f"Total Attendees: {attendees}, Type: {type(attendees)}")  # Debug print
 
-def get_attendance(filename):
+        # Calculate absentees
+        absentees = total_students - attendees
+
+        # Append the class data
+        classes_attendance.append({
+            'class_name': tclass.subject,  # Replace class_name with subject
+            'total_students': total_students,
+            'attendees': attendees,
+            'absentees': absentees
+        })
+
+    # Pass the attendance data for all classes to the template
+    return render_template('upload_attendance.html', classes_attendance=classes_attendance,class_id=class_id)
+
+
+
+
+def get_attendance(filename, class_name):
     with open(filename, 'r') as file:
         reader = csv.DictReader(file)
         print("CSV Headers:", reader.fieldnames)  # Print out the headers
@@ -1094,11 +1182,21 @@ def get_attendance(filename):
                 
                 # Now compare the name without the ID
                 if csv_name == combined_name:
+                    # If found, save attendance to the database
+                    attendance = Attendance(
+                        class_name=class_name,
+                        user_id=user.id,
+                        zoom_id=zoom_id,
+                        attended_date=datetime.now().date()  # Use today's date for attendance
+                    )
+                    db.session.add(attendance)
                     break
             else:
                 # If the user name isn't found in the CSV, mark them as missing the class
                 user.missed_classes += 1
                 db.session.commit()
+                
+        db.session.commit()
 
                 
 @app.route('/check_missed_classes', methods=['GET'])
@@ -1118,6 +1216,22 @@ def check_missed_classes():
     
     return "Reminders sent!", 200
 
+@app.route('/add_notification/<int:class_id>', methods=['GET', 'POST'])
+@login_required
+@csrf.exempt
+def add_notification(class_id):
+    class_data =Tclass.query.get_or_404(class_id)
+    
+    # Check if the current user is the teacher for the class
+    if current_user.id == class_data.teacher_id:
+        if request.method == 'POST':
+            notification = request.form['notification']
+            class_data.notification = notification
+            db.session.commit()
+            flash('Notification added successfully!', 'success')
+            return redirect(url_for('class_details_t', class_id=class_id,class_data=class_data))
+    
+    return render_template('class_details_t', class_data=class_data)
 
 
 
